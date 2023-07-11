@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2021 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2023 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,29 +31,33 @@
  *
  ****************************************************************************/
 
-#pragma once
+#include "ActuatorEffectivenessUUV.hpp"
 
-#include "ActuatorEffectiveness.hpp"
-#include "ActuatorEffectivenessRotors.hpp"
-#include "ActuatorEffectivenessControlSurfaces.hpp"
+using namespace matrix;
 
-class ActuatorEffectivenessCustom : public ModuleParams, public ActuatorEffectiveness
+ActuatorEffectivenessUUV::ActuatorEffectivenessUUV(ModuleParams *parent)
+	: ModuleParams(parent),
+	  _rotors(this)
 {
-public:
-	ActuatorEffectivenessCustom(ModuleParams *parent);
-	virtual ~ActuatorEffectivenessCustom() = default;
+}
 
-	bool getEffectivenessMatrix(Configuration &configuration, EffectivenessUpdateReason external_update) override;
+bool ActuatorEffectivenessUUV::getEffectivenessMatrix(Configuration &configuration,
+		EffectivenessUpdateReason external_update)
+{
+	if (external_update == EffectivenessUpdateReason::NO_EXTERNAL_UPDATE) {
+		return false;
+	}
 
-	void updateSetpoint(const matrix::Vector<float, NUM_AXES> &control_sp, int matrix_index,
-			    ActuatorVector &actuator_sp, const matrix::Vector<float, NUM_ACTUATORS> &actuator_min,
-			    const matrix::Vector<float, NUM_ACTUATORS> &actuator_max) override;
+	// Motors
+	const bool rotors_added_successfully = _rotors.addActuators(configuration);
+	_motors_mask = _rotors.getMotors();
 
-	const char *name() const override { return "Custom"; }
+	return rotors_added_successfully;
+}
 
-protected:
-	ActuatorEffectivenessRotors _motors;
-	ActuatorEffectivenessControlSurfaces _torque;
-
-	uint32_t _motors_mask{};
-};
+void ActuatorEffectivenessUUV::updateSetpoint(const matrix::Vector<float, NUM_AXES> &control_sp,
+		int matrix_index, ActuatorVector &actuator_sp, const matrix::Vector<float, NUM_ACTUATORS> &actuator_min,
+		const matrix::Vector<float, NUM_ACTUATORS> &actuator_max)
+{
+	stopMaskedMotorsWithZeroThrust(_motors_mask, actuator_sp);
+}
