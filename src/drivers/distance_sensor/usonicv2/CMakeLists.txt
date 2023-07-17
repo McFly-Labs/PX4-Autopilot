@@ -31,11 +31,13 @@
 #
 ############################################################################
 px4_add_module(
-	MODULE drivers__usonicv2
+	MODULE drivers__distance_sensor__usonicv2
 	MAIN usonicv2
 	COMPILE_FLAGS
 	SRCS
 		usonicv2.cpp
+		usonicv2.hpp
 	DEPENDS
 		drivers_rangefinder
+		px4_work_queue
 	)

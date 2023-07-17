@@ -52,7 +52,7 @@
 #include <perf/perf_counter.h>
 
 //Single Pin mode only needs the Trigger GPIO
-#if defined(GPIO_ULTRASOUND_TRIGGER)
+#if defined(GPIO_ULTRASOUND_ECHO)
 #  define HAVE_ULTRASOUND
 #endif
 
@@ -62,11 +62,15 @@ using namespace time_literals;
 static constexpr float USONICV2_MIN_DISTANCE{0.03f};
 static constexpr float USONICV2_MAX_DISTANCE{3.5f};
 
+//Test distance to publish
+static constexpr float USONICV2_TEST_DISTANCE{0.42f};
+
 // Normal conversion wait time.
-static constexpr uint32_t USONICV2_CONVERSION_INTERVAL{50_ms};
+static constexpr uint32_t USONICV2_CONVERSION_INTERVAL{50_us};
 
 // Maximum time to wait for a conversion to complete.
 static constexpr uint32_t USONICV2_CONVERSION_TIMEOUT{30_ms};
+
 
 class USONICV2 : public ModuleBase<USONICV2>, public px4::ScheduledWorkItem
 {
@@ -91,8 +95,10 @@ protected:
 	void stop();
 	int collect();
 	int measure();
-
+	int testSample();
+	void printState();
 	void Run() override;
+
 
 private:
 	uint32_t get_measure_interval() const { return USONICV2_CONVERSION_INTERVAL; };
@@ -102,6 +108,7 @@ private:
 
 	hrt_abstime _rising_edge_time{0};
 	hrt_abstime _falling_edge_time{0};
+	hrt_abstime _falling_trigger_time{0};
 
 	enum class STATE : uint8_t {
 		TRIGGER,

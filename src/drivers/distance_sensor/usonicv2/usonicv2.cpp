@@ -46,6 +46,10 @@
 
 #include "usonicv2.hpp"
 
+// REMOVEME!!!!
+#define HAVE_ULTRASOUND
+//
+
 #if defined(HAVE_ULTRASOUND)
 
 #include <px4_arch/micro_hal.h>
@@ -54,7 +58,7 @@ USONICV2::USONICV2(const uint8_t rotation) :
 	ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::hp_default),
 	_px4_rangefinder(0 /* no device type for GPIO input */, rotation)
 {
-	_px4_rangefinder.set_device_type(DRV_DIST_DEVTYPE_USONICV2);
+	_px4_rangefinder.set_device_type(DRV_DIST_DEVTYPE_SRF05);   /*not setting it's own device type may be bad.   We'll see*/
 	_px4_rangefinder.set_rangefinder_type(distance_sensor_s::MAV_DISTANCE_SENSOR_ULTRASOUND);
 	_px4_rangefinder.set_min_distance(USONICV2_MIN_DISTANCE);
 	_px4_rangefinder.set_max_distance(USONICV2_MAX_DISTANCE);
@@ -74,35 +78,31 @@ void USONICV2::OnEdge(bool state)
 	const hrt_abstime now = hrt_absolute_time();
 
 	if (_state == STATE::WAIT_FOR_RISING || _state == STATE::WAIT_FOR_FALLING) {
+		//PX4_INFO("Edge detected");
 		if (state) {
 			_rising_edge_time = now;
 			_state = STATE::WAIT_FOR_FALLING;
 
 		} else {
-			if (_state == STATE::WAIT_FOR_RISING ) {
-				// This may get called by flipping the GPIO low to trigger the measurement.  If this is the case it should do nothing.
-				PX4_INFO("Predictable Error: OnEdge() trigger overlapped for usonicv2."); // So we know it happened
-			} else {
-				_falling_edge_time = now;
-				_state = STATE::SAMPLE;
-				px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 1);
-				ScheduleNow();
-			}
+			_falling_edge_time = now;
+			_state = STATE::SAMPLE;
+			ScheduleNow();
+
 		}
 	}
 }
 
 int USONICV2::EchoInterruptCallback(int irq, void *context, void *arg)
 {
-	static_cast<USONICV2 *>(arg)->OnEdge(px4_arch_gpioread(GPIO_ULTRASOUND_TRIGGER));
+	static_cast<USONICV2 *>(arg)->OnEdge(px4_arch_gpioread(GPIO_ULTRASOUND_ECHO));
 	return 0;
 }
 
 int
 USONICV2::init()
 {
-	px4_arch_configgpio(GPIO_ULTRASOUND_TRIGGER);
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 1);
+	px4_arch_configgpio(GPIO_ULTRASOUND_ECHO);
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
 	px4_arch_gpiosetevent(GPIO_ULTRASOUND_ECHO, true, true, false, &EchoInterruptCallback, this);
 	_state = STATE::TRIGGER;
 	ScheduleOnInterval(get_measure_interval());
@@ -110,11 +110,11 @@ USONICV2::init()
 }
 
 void USONICV2::stop()
-{1
+{
 
 	_state = STATE::EXIT;
-	px4_arch_gpiosetevent(GPIO_ULTRASOUND_TRIGGER, false, false, false, nullptr, nullptr);
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 1);
+	px4_arch_gpiosetevent(GPIO_ULTRASOUND_ECHO, false, false, false, nullptr, nullptr);
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 1);
 	ScheduleClear();
 }
 
@@ -129,24 +129,52 @@ USONICV2::Run()
 
 	switch (_state) {
 
-	case STATE::TRIGGER:
+	case STATE::TRIGGER: {
+			px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
+			px4_usleep(2);
+			px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 1);
+			px4_usleep(10);
+			px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
+			_falling_trigger_time  = hrt_absolute_time();
+			_state = STATE::WAIT_FOR_RISING; //State switch after should beat the race condition with GPIO event triggering OnEdge()
+			break;
+		}
 
-		px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0); // ya ya I know they're wrong! It triggers on the falling edge.
-		_state = STATE::WAIT_FOR_RISING; //State switch after should beat the race condition with GPIO event triggering OnEdge()
-		break;
+	case STATE::WAIT_FOR_RISING: {
+			const hrt_abstime now = hrt_absolute_time();
+			const hrt_abstime dt = now - _falling_trigger_time;
 
-	case STATE::WAIT_FOR_RISING:
+			/*Watch for timeout and reset the trigger*/
+			if (dt >= USONICV2_CONVERSION_TIMEOUT) {
+				perf_count(
+					_sensor_resets); //This might be because there wasn't any answer the distance was too high.  Use common sense here
+				/* DEBUGGING Logging*/
+				PX4_INFO("usonicv2 No response to trigger");
+				/* set trigger for next attempt*/
+				_state = STATE::TRIGGER;
+
+			}
+
+			break;
+		}
+
 	case STATE::WAIT_FOR_FALLING:
-		_state = STATE::TRIGGER;
-		perf_count(_sensor_resets);
-		px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 1);
-		break;
+		/*Watch for timeout and reset the trigger*/
+		{
+			perf_count(_sensor_resets);
+			/* DEBUGGING Logging*/
+			PX4_INFO("Output stayed high");
+			/* set trigger for next attempt*/
+			_state = STATE::TRIGGER;
+			break;
+		}
 
-	case STATE::SAMPLE:
-		_state = STATE::MEASURE;
-		measure();
-		_state = STATE::TRIGGER;
-		break;
+	case STATE::SAMPLE: {
+			_state = STATE::MEASURE;
+			measure();
+			_state = STATE::TRIGGER;
+			break;
+		}
 
 	case STATE::EXIT:
 	default:
@@ -166,6 +194,76 @@ USONICV2::measure()
 
 	if (dt > USONICV2_CONVERSION_TIMEOUT) {
 		perf_count(_comms_errors);
+		PX4_INFO("usonicv2 conversion timeout");
+
+	} else {
+		_px4_rangefinder.update(timestamp_sample, current_distance);
+	}
+
+	perf_end(_sample_perf);
+	return PX4_OK;
+}
+
+void
+USONICV2::printState()
+{
+	printf("Line is currently %s\n", px4_arch_gpioread(GPIO_ULTRASOUND_ECHO) ? "true" : "false");
+	printf("Trigger time is %lli ,", _falling_trigger_time);
+	printf("_rising_edge_time is %lli ,and ", _rising_edge_time);
+	printf("_falling_edge_time is %lli \n", _falling_edge_time);
+	return;
+
+}
+
+int
+USONICV2::testSample()
+{
+	perf_begin(_sample_perf);
+	_state = STATE::MEASURE;
+	_falling_trigger_time = 0;
+	_rising_edge_time = 0;
+	_falling_edge_time = 0;
+	printState();
+	const hrt_abstime timestamp_sample = hrt_absolute_time();
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
+	px4_usleep(2);
+	printState();
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 1);
+	printState();
+	px4_usleep(10);
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
+	_falling_trigger_time  = hrt_absolute_time();
+	printState();
+
+	while (!px4_arch_gpioread(GPIO_ULTRASOUND_ECHO)) {
+		if (hrt_absolute_time() >= _falling_trigger_time + USONICV2_CONVERSION_TIMEOUT) {
+			printf("Leading edge not detected\n");
+			break;
+		}
+	}
+
+	_rising_edge_time = hrt_absolute_time();
+
+	while (px4_arch_gpioread(GPIO_ULTRASOUND_ECHO)) {
+		if (hrt_absolute_time() >= _falling_trigger_time + USONICV2_CONVERSION_TIMEOUT) {
+			printf("Falling edge not detected\n");
+			break;;
+		}
+	}
+
+	printState();
+	const hrt_abstime dt = _falling_edge_time - _rising_edge_time;
+
+	float current_distance = dt *  343.0f / 1e6f / 2.0f;
+	printf("Time difference: ");
+	printf("%lli", dt);
+	printf(" \n");
+
+	if (dt > USONICV2_CONVERSION_TIMEOUT) {
+		perf_count(_comms_errors);
+		PX4_INFO("usonicv2 conversion timeout");
+		perf_end(_sample_perf);
+		return 0;
 
 	} else {
 		_px4_rangefinder.update(timestamp_sample, current_distance);
@@ -256,13 +354,22 @@ USONICV2::print_status()
 	perf_print_counter(_comms_errors);
 	perf_print_counter(_sensor_resets);
 	printf("poll interval:  %" PRIu32 " \n", get_measure_interval());
+	printf("Test measurement\n");
+
+	if (testSample() == PX4_OK) {
+		printf("\nTest worked");
+
+	} else {
+		printf("\nTest failed");
+	}
+
 	return 0;
 }
 
-extern "C" __EXPORT int USONICV2_main(int argc, char *argv[])
+extern "C" __EXPORT int usonicv2_main(int argc, char *argv[])
 {
 	return USONICV2::main(argc, argv);
 }
 #else
-# error ("GPIO_ULTRASOUND_TRIGGER not defined. Driver not supported.");
+# error ("GPIO_ULTRASOUND_ECHO not defined. Driver not supported.");
 #endif
