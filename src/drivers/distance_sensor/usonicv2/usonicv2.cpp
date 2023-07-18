@@ -357,7 +357,7 @@ USONICV2::print_status()
 	perf_print_counter(_comms_errors);
 	perf_print_counter(_sensor_resets);
 	printf("poll interval:  %" PRIu32 " \n", get_measure_interval());
-	printf("Test measurement\n");
+//	printf("Test measurement\n");
 
 //	if (testSample() == PX4_OK) {
 //		printf("\nTest worked");
