@@ -204,8 +204,8 @@ USONICV2::measure()
 	return PX4_OK;
 }
 /*
-/* Just for troubleshooting....didn't seem to work even though code was working
-/*
+// Just for troubleshooting....didn't seem to work even though code was working
+//
 void
 USONICV2::printState()
 {
@@ -359,13 +359,13 @@ USONICV2::print_status()
 	printf("poll interval:  %" PRIu32 " \n", get_measure_interval());
 	printf("Test measurement\n");
 
-	if (testSample() == PX4_OK) {
-		printf("\nTest worked");
+//	if (testSample() == PX4_OK) {
+//		printf("\nTest worked");
 
-	} else {
-		printf("\nTest failed");
-	}
-
+//	} else {
+//		printf("\nTest failed");
+//	}
+//
 	return 0;
 }
 
