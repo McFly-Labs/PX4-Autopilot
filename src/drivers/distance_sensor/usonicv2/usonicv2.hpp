@@ -52,7 +52,7 @@
 #include <perf/perf_counter.h>
 
 //Single Pin mode only needs the Trigger GPIO
-#if defined(GPIO_ULTRASOUND_ECHO)
+#if defined(GPIO_ULTRASOUND_TRIGGER) && defined(GPIO_ULTRASOUND_ECHO)
 #  define HAVE_ULTRASOUND
 #endif
 
@@ -66,7 +66,7 @@ static constexpr float USONICV2_MAX_DISTANCE{3.5f};
 static constexpr float USONICV2_TEST_DISTANCE{0.42f};
 
 // Normal conversion wait time.
-static constexpr uint32_t USONICV2_CONVERSION_INTERVAL{50_us};
+static constexpr uint32_t USONICV2_CONVERSION_INTERVAL{50_ms};
 
 // Maximum time to wait for a conversion to complete.
 static constexpr uint32_t USONICV2_CONVERSION_TIMEOUT{30_ms};

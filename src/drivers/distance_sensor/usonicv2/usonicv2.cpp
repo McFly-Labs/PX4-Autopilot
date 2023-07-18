@@ -47,7 +47,7 @@
 #include "usonicv2.hpp"
 
 // REMOVEME!!!!
-#define HAVE_ULTRASOUND
+//#define HAVE_ULTRASOUND
 //
 
 #if defined(HAVE_ULTRASOUND)
@@ -102,7 +102,8 @@ int
 USONICV2::init()
 {
 	px4_arch_configgpio(GPIO_ULTRASOUND_ECHO);
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
+	px4_arch_configgpio(GPIO_ULTRASOUND_TRIGGER);
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0);
 	px4_arch_gpiosetevent(GPIO_ULTRASOUND_ECHO, true, true, false, &EchoInterruptCallback, this);
 	_state = STATE::TRIGGER;
 	ScheduleOnInterval(get_measure_interval());
@@ -114,7 +115,7 @@ void USONICV2::stop()
 
 	_state = STATE::EXIT;
 	px4_arch_gpiosetevent(GPIO_ULTRASOUND_ECHO, false, false, false, nullptr, nullptr);
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 1);
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 1);
 	ScheduleClear();
 }
 
@@ -130,11 +131,11 @@ USONICV2::Run()
 	switch (_state) {
 
 	case STATE::TRIGGER: {
-			px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
+			px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0);
 			px4_usleep(2);
-			px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 1);
+			px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 1);
 			px4_usleep(10);
-			px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
+			px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0);
 			_falling_trigger_time  = hrt_absolute_time();
 			_state = STATE::WAIT_FOR_RISING; //State switch after should beat the race condition with GPIO event triggering OnEdge()
 			break;
@@ -146,10 +147,9 @@ USONICV2::Run()
 
 			/*Watch for timeout and reset the trigger*/
 			if (dt >= USONICV2_CONVERSION_TIMEOUT) {
-				perf_count(
-					_sensor_resets); //This might be because there wasn't any answer the distance was too high.  Use common sense here
+				perf_count(_sensor_resets); //This might be because there wasn't any answer the distance was too high.  Use common sense here
 				/* DEBUGGING Logging*/
-				PX4_INFO("usonicv2 No response to trigger");
+				//PX4_INFO("usonicv2 No response to trigger");
 				/* set trigger for next attempt*/
 				_state = STATE::TRIGGER;
 
@@ -163,7 +163,7 @@ USONICV2::Run()
 		{
 			perf_count(_sensor_resets);
 			/* DEBUGGING Logging*/
-			PX4_INFO("Output stayed high");
+			//PX4_INFO("Output stayed high");
 			/* set trigger for next attempt*/
 			_state = STATE::TRIGGER;
 			break;
@@ -203,7 +203,9 @@ USONICV2::measure()
 	perf_end(_sample_perf);
 	return PX4_OK;
 }
-
+/*
+/* Just for troubleshooting....didn't seem to work even though code was working
+/*
 void
 USONICV2::printState()
 {
@@ -225,13 +227,13 @@ USONICV2::testSample()
 	_falling_edge_time = 0;
 	printState();
 	const hrt_abstime timestamp_sample = hrt_absolute_time();
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0);
 	px4_usleep(2);
 	printState();
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 1);
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 1);
 	printState();
 	px4_usleep(10);
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_ECHO, 0);
+	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0);
 	_falling_trigger_time  = hrt_absolute_time();
 	printState();
 
@@ -270,9 +272,10 @@ USONICV2::testSample()
 	}
 
 	perf_end(_sample_perf);
+	_state = STATE::TRIGGER;
 	return PX4_OK;
 }
-
+*/
 int USONICV2::custom_command(int argc, char *argv[])
 {
 	return print_usage("unknown command");
