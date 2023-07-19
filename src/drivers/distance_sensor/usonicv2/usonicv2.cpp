@@ -34,21 +34,40 @@
 
 /**
  * @file USONICV2.cpp
- * @author Andrew McFarland <andrew@steamfoundry.ca
+ * @author Andrew McFarland <andrew@steamfoundry.ca>
+ * @author David Sidrane <david.sidrane@nscdg.com>
  *
- * Interface for the SeeedStudio Ultrasonic Ranger v2.0 (or SRF05 in single GPIO mode)
- * Driver based on the SRF05 modified to use a single GPIO.   Should be connected to the TRIGGER pin
+ * Interface for the SRF05 in single GPIO mode or the SeeedStudio Ultrasonic Ranger v2.0
+ * Driver adapted from the SRF05 with a modified trigger sequence and a timeout from the trigger firing.
+ * This helps ensure the shared connection didn't overlap and that it consistently triggers.
  *
- * IMPORTANT - sensor sec says it needs a 10uSec pulse to turn it on.
- * Instead of wasting CPU on sleep, trying this by setting the GPIO high from the start,
- * then just setting it low to start the reading.  This should work I hope.
+ * https://www.robot-electronics.co.uk/htm/srf05tech.htm - Information on SRF05 single pin mode
+ * https://docs.px4.io/main/en/sensor/lidar_lite.html - Instructions I used for connecting FMU to sensor
+ * https://wiki.seeedstudio.com/Grove-Ultrasonic_Ranger/ - More information on the SeeedStudio Ultrasonic Ranger v2
+ *
+ * IMPORTANT - I was unable to make it work using a single GPIO on the NXP FMUK66-E.
+ * Instead, the TRIGGER and ECHO pings must be connected through a 450ohm resistor
+ * Then ECHO is connected to the signal pin on the sensor
+ *
+ *
+ * +---------------+                      +------------------------+
+ * |               |                      |                        |
+ * |        Signal-+-+--------------------+-ECHO                   |
+ * |               | |                    |                        |
+ * |               | |   +-----------+    |                        |
+ * |               | +---+   450ohm  +----+-TRIGGER      FMU with  |
+ * |  SRF05        |     +-----------+    |            USONIC port |
+ * |               |                      |                        |
+ * |         +5V --+----------------------+-+5V                    |
+ * |               |                      |                        |
+ * |          GND--+----------------------+-GND                    |
+ * |               |                      |                        |
+ * +---------------+                      +------------------------+
+ *
+ *
  */
 
 #include "usonicv2.hpp"
-
-// REMOVEME!!!!
-//#define HAVE_ULTRASOUND
-//
 
 #if defined(HAVE_ULTRASOUND)
 
@@ -78,7 +97,7 @@ void USONICV2::OnEdge(bool state)
 	const hrt_abstime now = hrt_absolute_time();
 
 	if (_state == STATE::WAIT_FOR_RISING || _state == STATE::WAIT_FOR_FALLING) {
-		//PX4_INFO("Edge detected");
+		//PX4_INFO("Edge detected"); //Used in testing
 		if (state) {
 			_rising_edge_time = now;
 			_state = STATE::WAIT_FOR_FALLING;
@@ -131,13 +150,16 @@ USONICV2::Run()
 	switch (_state) {
 
 	case STATE::TRIGGER: {
+		/* Triggering using explicit timing.   This is not as CPU efficient
+		 * The other method used by SRF05 didn't consistently trigger the sensor
+		 */
 			px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0);
 			px4_usleep(2);
 			px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 1);
 			px4_usleep(10);
 			px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0);
 			_falling_trigger_time  = hrt_absolute_time();
-			_state = STATE::WAIT_FOR_RISING; //State switch after should beat the race condition with GPIO event triggering OnEdge()
+			_state = STATE::WAIT_FOR_RISING; //State switch after the trigger to avoid detecting the return pulse
 			break;
 		}
 
@@ -147,14 +169,13 @@ USONICV2::Run()
 
 			/*Watch for timeout and reset the trigger*/
 			if (dt >= USONICV2_CONVERSION_TIMEOUT) {
-				perf_count(_sensor_resets); //This might be because there wasn't any answer the distance was too high.  Use common sense here
+				perf_count(_sensor_resets);
 				/* DEBUGGING Logging*/
 				//PX4_INFO("usonicv2 No response to trigger");
-				/* set trigger for next attempt*/
+				/* reset to trigger for next attempt*/
 				_state = STATE::TRIGGER;
 
 			}
-
 			break;
 		}
 

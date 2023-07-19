@@ -35,10 +35,10 @@
 /**
  * @file usonicv2.hpp
  * @author Andrew McFarland <andrew@steamfoundry.ca
+
  *
- * Interface for the SeeedStudio Ultrasonic Ranger v2.0 (or SRF05 in single GPIO mode)
- * Driver based on the SRF05 modified to use a single GPIO
  */
+
 #pragma once
 
 #include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
@@ -51,7 +51,7 @@
 #include <lib/drivers/rangefinder/PX4Rangefinder.hpp>
 #include <perf/perf_counter.h>
 
-//Single Pin mode only needs the Trigger GPIO
+//Still needs both pins on the FMU
 #if defined(GPIO_ULTRASOUND_TRIGGER) && defined(GPIO_ULTRASOUND_ECHO)
 #  define HAVE_ULTRASOUND
 #endif
@@ -62,8 +62,8 @@ using namespace time_literals;
 static constexpr float USONICV2_MIN_DISTANCE{0.03f};
 static constexpr float USONICV2_MAX_DISTANCE{3.5f};
 
-//Test distance to publish
-static constexpr float USONICV2_TEST_DISTANCE{0.42f};
+//Test distance to publish - Unused
+//static constexpr float USONICV2_TEST_DISTANCE{0.42f};
 
 // Normal conversion wait time.
 static constexpr uint32_t USONICV2_CONVERSION_INTERVAL{50_ms};
@@ -95,8 +95,8 @@ protected:
 	void stop();
 	int collect();
 	int measure();
-	int testSample();
-	void printState();
+//	int testSample(); //Used during testing
+//	void printState();
 	void Run() override;
 
 
