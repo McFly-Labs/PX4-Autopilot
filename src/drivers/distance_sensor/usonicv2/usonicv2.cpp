@@ -42,11 +42,12 @@
  * This helps ensure the shared connection didn't overlap and that it consistently triggers.
  *
  * https://www.robot-electronics.co.uk/htm/srf05tech.htm - Information on SRF05 single pin mode
- * https://docs.px4.io/main/en/sensor/lidar_lite.html - Instructions I used for connecting FMU to sensor
+ * https://docs.px4.io/main/en/sensor/lidar_lite.html - Instructions I used for connecting FMU to the sensor (Same as Garmin Lidar Lite)
+ * 	-!Don't get confused by the table underneath specific to the Pixhawk V1 using PWM 5 & 6.
  * https://wiki.seeedstudio.com/Grove-Ultrasonic_Ranger/ - More information on the SeeedStudio Ultrasonic Ranger v2
  *
  * IMPORTANT - I was unable to make it work using a single GPIO on the NXP FMUK66-E.
- * Instead, the TRIGGER and ECHO pings must be connected through a 450ohm resistor
+ * Instead, the TRIGGER and ECHO pings must be connected through a ~450ohm resistor
  * Then ECHO is connected to the signal pin on the sensor
  *
  *
@@ -77,7 +78,7 @@ USONICV2::USONICV2(const uint8_t rotation) :
 	ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::hp_default),
 	_px4_rangefinder(0 /* no device type for GPIO input */, rotation)
 {
-	_px4_rangefinder.set_device_type(DRV_DIST_DEVTYPE_SRF05);   /*not setting it's own device type may be bad.   We'll see*/
+	_px4_rangefinder.set_device_type(DRV_DIST_DEVTYPE_SRF05);   /*Reusing the device type since the differences are minor*/
 	_px4_rangefinder.set_rangefinder_type(distance_sensor_s::MAV_DISTANCE_SENSOR_ULTRASOUND);
 	_px4_rangefinder.set_min_distance(USONICV2_MIN_DISTANCE);
 	_px4_rangefinder.set_max_distance(USONICV2_MAX_DISTANCE);
@@ -97,16 +98,14 @@ void USONICV2::OnEdge(bool state)
 	const hrt_abstime now = hrt_absolute_time();
 
 	if (_state == STATE::WAIT_FOR_RISING || _state == STATE::WAIT_FOR_FALLING) {
-		//PX4_INFO("Edge detected"); //Used in testing
+		//PX4_INFO("Edge detected"); //Testing code
 		if (state) {
 			_rising_edge_time = now;
 			_state = STATE::WAIT_FOR_FALLING;
-
 		} else {
 			_falling_edge_time = now;
 			_state = STATE::SAMPLE;
 			ScheduleNow();
-
 		}
 	}
 }
@@ -215,7 +214,7 @@ USONICV2::measure()
 
 	if (dt > USONICV2_CONVERSION_TIMEOUT) {
 		perf_count(_comms_errors);
-		PX4_INFO("usonicv2 conversion timeout");
+		//PX4_INFO("usonicv2 conversion timeout");
 
 	} else {
 		_px4_rangefinder.update(timestamp_sample, current_distance);
@@ -225,8 +224,8 @@ USONICV2::measure()
 	return PX4_OK;
 }
 /*
-// Just for troubleshooting....didn't seem to work even though code was working
-//
+ * Just for troubleshooting..
+*
 void
 USONICV2::printState()
 {
@@ -235,68 +234,9 @@ USONICV2::printState()
 	printf("_rising_edge_time is %lli ,and ", _rising_edge_time);
 	printf("_falling_edge_time is %lli \n", _falling_edge_time);
 	return;
-
-}
-
-int
-USONICV2::testSample()
-{
-	perf_begin(_sample_perf);
-	_state = STATE::MEASURE;
-	_falling_trigger_time = 0;
-	_rising_edge_time = 0;
-	_falling_edge_time = 0;
-	printState();
-	const hrt_abstime timestamp_sample = hrt_absolute_time();
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0);
-	px4_usleep(2);
-	printState();
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 1);
-	printState();
-	px4_usleep(10);
-	px4_arch_gpiowrite(GPIO_ULTRASOUND_TRIGGER, 0);
-	_falling_trigger_time  = hrt_absolute_time();
-	printState();
-
-	while (!px4_arch_gpioread(GPIO_ULTRASOUND_ECHO)) {
-		if (hrt_absolute_time() >= _falling_trigger_time + USONICV2_CONVERSION_TIMEOUT) {
-			printf("Leading edge not detected\n");
-			break;
-		}
-	}
-
-	_rising_edge_time = hrt_absolute_time();
-
-	while (px4_arch_gpioread(GPIO_ULTRASOUND_ECHO)) {
-		if (hrt_absolute_time() >= _falling_trigger_time + USONICV2_CONVERSION_TIMEOUT) {
-			printf("Falling edge not detected\n");
-			break;;
-		}
-	}
-
-	printState();
-	const hrt_abstime dt = _falling_edge_time - _rising_edge_time;
-
-	float current_distance = dt *  343.0f / 1e6f / 2.0f;
-	printf("Time difference: ");
-	printf("%lli", dt);
-	printf(" \n");
-
-	if (dt > USONICV2_CONVERSION_TIMEOUT) {
-		perf_count(_comms_errors);
-		PX4_INFO("usonicv2 conversion timeout");
-		perf_end(_sample_perf);
-		return 0;
-
-	} else {
-		_px4_rangefinder.update(timestamp_sample, current_distance);
-	}
-
-	perf_end(_sample_perf);
-	_state = STATE::TRIGGER;
-	return PX4_OK;
 }
 */
+
 int USONICV2::custom_command(int argc, char *argv[])
 {
 	return print_usage("unknown command");
@@ -378,15 +318,16 @@ USONICV2::print_status()
 	perf_print_counter(_comms_errors);
 	perf_print_counter(_sensor_resets);
 	printf("poll interval:  %" PRIu32 " \n", get_measure_interval());
+/*
+ * Test code - Don't use
 //	printf("Test measurement\n");
-
 //	if (testSample() == PX4_OK) {
 //		printf("\nTest worked");
-
 //	} else {
 //		printf("\nTest failed");
 //	}
 //
+*/
 	return 0;
 }
 

@@ -35,8 +35,8 @@
 /**
  * @file usonicv2.hpp
  * @author Andrew McFarland <andrew@steamfoundry.ca
-
- *
+ * @author David Sidrane <david.sidrane@nscdg.com>
+ * Adapted from the SRF-05 Ultrasonic driver
  */
 
 #pragma once
@@ -62,7 +62,7 @@ using namespace time_literals;
 static constexpr float USONICV2_MIN_DISTANCE{0.03f};
 static constexpr float USONICV2_MAX_DISTANCE{3.5f};
 
-//Test distance to publish - Unused
+//Test distance to publish - Unused now
 //static constexpr float USONICV2_TEST_DISTANCE{0.42f};
 
 // Normal conversion wait time.
