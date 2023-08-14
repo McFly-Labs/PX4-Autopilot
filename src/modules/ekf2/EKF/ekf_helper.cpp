@@ -40,6 +40,8 @@
  */
 
 #include "ekf.h"
+#include "python/ekf_derivation/generated/quat_var_to_rot_var.h"
+#include "python/ekf_derivation/generated/yaw_var_to_lower_triangular_quat_cov.h"
 
 #include <mathlib/mathlib.h>
 #include <cstdlib>
@@ -882,46 +884,18 @@ void Ekf::updateVerticalDeadReckoningStatus()
 // calculate the variances for the rotation vector equivalent
 Vector3f Ekf::calcRotVecVariances() const
 {
-	Vector3f rot_var_vec;
-	float q0, q1, q2, q3;
+	Vector3f rot_var;
+	sym::QuatVarToRotVar(getStateAtFusionHorizonAsVector(), P, FLT_EPSILON, &rot_var);
+	return rot_var;
+}
 
-	if (_state.quat_nominal(0) >= 0.0f) {
-		q0 = _state.quat_nominal(0);
-		q1 = _state.quat_nominal(1);
-		q2 = _state.quat_nominal(2);
-		q3 = _state.quat_nominal(3);
+float Ekf::getYawVar() const
+{
+	Vector24f H_YAW;
+	float yaw_var = 0.f;
+	computeYawInnovVarAndH(0.f, yaw_var, H_YAW);
 
-	} else {
-		q0 = -_state.quat_nominal(0);
-		q1 = -_state.quat_nominal(1);
-		q2 = -_state.quat_nominal(2);
-		q3 = -_state.quat_nominal(3);
-	}
-	float t2 = q0*q0;
-	float t3 = acosf(q0);
-	float t4 = -t2+1.0f;
-	float t5 = t2-1.0f;
-	if ((t4 > 1e-9f) && (t5 < -1e-9f)) {
-		float t6 = 1.0f/t5;
-		float t7 = q1*t6*2.0f;
-		float t8 = 1.0f/powf(t4,1.5f);
-		float t9 = q0*q1*t3*t8*2.0f;
-		float t10 = t7+t9;
-		float t11 = 1.0f/sqrtf(t4);
-		float t12 = q2*t6*2.0f;
-		float t13 = q0*q2*t3*t8*2.0f;
-		float t14 = t12+t13;
-		float t15 = q3*t6*2.0f;
-		float t16 = q0*q3*t3*t8*2.0f;
-		float t17 = t15+t16;
-		rot_var_vec(0) = t10*(P(0,0)*t10+P(1,0)*t3*t11*2.0f)+t3*t11*(P(0,1)*t10+P(1,1)*t3*t11*2.0f)*2.0f;
-		rot_var_vec(1) = t14*(P(0,0)*t14+P(2,0)*t3*t11*2.0f)+t3*t11*(P(0,2)*t14+P(2,2)*t3*t11*2.0f)*2.0f;
-		rot_var_vec(2) = t17*(P(0,0)*t17+P(3,0)*t3*t11*2.0f)+t3*t11*(P(0,3)*t17+P(3,3)*t3*t11*2.0f)*2.0f;
-	} else {
-		rot_var_vec = 4.0f * P.slice<3,3>(1,1).diag();
-	}
-
-	return rot_var_vec;
+	return yaw_var;
 }
 
 // initialise the quaternion covariances using rotation vector variances
@@ -1044,46 +1018,12 @@ void Ekf::updateGroundEffect()
 	}
 }
 
-// Increase the yaw error variance of the quaternions
-// Argument is additional yaw variance in rad**2
 void Ekf::increaseQuatYawErrVariance(float yaw_variance)
 {
-	// See DeriveYawResetEquations.m for derivation which produces code fragments in C_code4.txt file
-	// The auto-code was cleaned up and had terms multiplied by zero removed to give the following:
-
-	// Intermediate variables
-	float SG[3];
-	SG[0] = sq(_state.quat_nominal(0)) - sq(_state.quat_nominal(1)) - sq(_state.quat_nominal(2)) + sq(_state.quat_nominal(3));
-	SG[1] = 2*_state.quat_nominal(0)*_state.quat_nominal(2) - 2*_state.quat_nominal(1)*_state.quat_nominal(3);
-	SG[2] = 2*_state.quat_nominal(0)*_state.quat_nominal(1) + 2*_state.quat_nominal(2)*_state.quat_nominal(3);
-
-	float SQ[4];
-	SQ[0] = 0.5f * ((_state.quat_nominal(1)*SG[0]) - (_state.quat_nominal(0)*SG[2]) + (_state.quat_nominal(3)*SG[1]));
-	SQ[1] = 0.5f * ((_state.quat_nominal(0)*SG[1]) - (_state.quat_nominal(2)*SG[0]) + (_state.quat_nominal(3)*SG[2]));
-	SQ[2] = 0.5f * ((_state.quat_nominal(3)*SG[0]) - (_state.quat_nominal(1)*SG[1]) + (_state.quat_nominal(2)*SG[2]));
-	SQ[3] = 0.5f * ((_state.quat_nominal(0)*SG[0]) + (_state.quat_nominal(1)*SG[2]) + (_state.quat_nominal(2)*SG[1]));
-
-	// Limit yaw variance increase to prevent a badly conditioned covariance matrix
-	yaw_variance = fminf(yaw_variance, 1.0e-2f);
-
-	// Add covariances for additonal yaw uncertainty to existing covariances.
-	// This assumes that the additional yaw error is uncorrrelated to existing errors
-	P(0,0) += yaw_variance*sq(SQ[2]);
-	P(0,1) += yaw_variance*SQ[1]*SQ[2];
-	P(1,1) += yaw_variance*sq(SQ[1]);
-	P(0,2) += yaw_variance*SQ[0]*SQ[2];
-	P(1,2) += yaw_variance*SQ[0]*SQ[1];
-	P(2,2) += yaw_variance*sq(SQ[0]);
-	P(0,3) -= yaw_variance*SQ[2]*SQ[3];
-	P(1,3) -= yaw_variance*SQ[1]*SQ[3];
-	P(2,3) -= yaw_variance*SQ[0]*SQ[3];
-	P(3,3) += yaw_variance*sq(SQ[3]);
-	P(1,0) += yaw_variance*SQ[1]*SQ[2];
-	P(2,0) += yaw_variance*SQ[0]*SQ[2];
-	P(2,1) += yaw_variance*SQ[0]*SQ[1];
-	P(3,0) -= yaw_variance*SQ[2]*SQ[3];
-	P(3,1) -= yaw_variance*SQ[1]*SQ[3];
-	P(3,2) -= yaw_variance*SQ[0]*SQ[3];
+	matrix::SquareMatrix<float, 4> q_cov;
+	sym::YawVarToLowerTriangularQuatCov(getStateAtFusionHorizonAsVector(), yaw_variance, &q_cov);
+	q_cov.copyLowerToUpperTriangle();
+	P.slice<4, 4>(0, 0) += q_cov;
 }
 
 void Ekf::saveMagCovData()
